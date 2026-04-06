@@ -284,6 +284,16 @@ Fine-tuned adapter available at: `huggingface.co/yourusername/llama3-ragnarok-ad
 
 ---
 
+## Running on a New Machine
+
+After cloning the repo and installing dependencies,
+you will need to re-upload your documents via POST /api/upload
+since ChromaDB is stored locally and not tracked in Git.
+
+Production roadmap includes migrating to Pinecone for 
+persistent cloud vector storage and AWS S3 for document storage,
+eliminating the need to re-upload on each new deployment.
+
 ## 🚢 Deployment
 
 ### Backend — Railway
