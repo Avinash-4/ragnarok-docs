@@ -1,0 +1,27 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Secrets - NEVER commit this
+.env
+
+# Data and models (too large for git)
+data/raw/*
+data/processed/*
+models/*
+
+# Keep folders in git
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!models/.gitkeep
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Misc
+*.log
+.DS_Store
