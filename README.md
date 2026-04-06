@@ -369,6 +369,19 @@ model = PeftModel.from_pretrained(
 )
 ```
 
+### Stage 2 — Refusal Behavior Training
+
+After Stage 1, I identified that the model answered every question even when the answer was not in the document. I ran a second fine-tuning stage on SQuAD v2 to teach the model to say "I cannot find this information in the provided context" when the answer is not present.
+
+| Stage | Dataset | Purpose | Result |
+|---|---|---|---|
+| Stage 1 | Google Natural Questions (20,000) | Document Q&A format | Val loss 0.903, Perplexity 2.47 |
+| Stage 2 | SQuAD v2 — 50/50 balanced (7,200) | Refusal behavior | 88% overall, 100% refusal accuracy |
+
+**Stage 2 adapter:** `huggingface.co/avinashkongara4/llama3-ragnarok-stage2-adapter`
+
+The final merged model combines both stages — answering accurately from context and refusing confidently when the answer is not there.
+
 ---
 
 ## Running on a New Machine
