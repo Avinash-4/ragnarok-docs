@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ragnarok-Docs</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f13; color: #e2e2e2; min-height: 100vh; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px; background: #1a1a24; border-bottom: 1px solid #2a2a38;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.05em; color: #fff; }
+    header span { font-size: 0.75rem; color: #888; }
+
+    /* Toggle */
+    .model-toggle {
+      display: flex; align-items: center; gap: 12px;
+      background: #111118; border: 1px solid #2a2a38; border-radius: 10px; padding: 8px 14px;
+    }
+    .model-toggle label { font-size: 0.8rem; color: #aaa; }
+    .toggle-group { display: flex; gap: 6px; }
+    .toggle-btn {
+      padding: 5px 14px; border-radius: 6px; border: 1px solid #333; background: transparent;
+      color: #aaa; font-size: 0.78rem; cursor: pointer; transition: all 0.15s;
+    }
+    .toggle-btn.active { background: #6c47ff; border-color: #6c47ff; color: #fff; font-weight: 600; }
+    .toggle-btn:hover:not(.active) { border-color: #555; color: #ddd; }
+    #mode-status { font-size: 0.72rem; color: #888; min-width: 120px; }
+
+    main { max-width: 800px; margin: 48px auto; padding: 0 24px; }
+
+    /* Upload */
+    .section { margin-bottom: 36px; }
+    .section h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; color: #666; margin-bottom: 12px; }
+
+    .upload-box {
+      border: 1.5px dashed #2e2e42; border-radius: 10px; padding: 28px;
+      text-align: center; cursor: pointer; transition: border-color 0.2s;
+    }
+    .upload-box:hover { border-color: #6c47ff; }
+    .upload-box input { display: none; }
+    .upload-box p { color: #555; font-size: 0.88rem; }
+    .upload-box p span { color: #6c47ff; }
+    #upload-status { margin-top: 10px; font-size: 0.82rem; color: #888; }
+
+    /* Query */
+    .query-row { display: flex; gap: 10px; }
+    .query-row input {
+      flex: 1; padding: 12px 16px; background: #1a1a24; border: 1px solid #2a2a38;
+      border-radius: 8px; color: #e2e2e2; font-size: 0.9rem; outline: none;
+    }
+    .query-row input:focus { border-color: #6c47ff; }
+    .query-row button {
+      padding: 12px 22px; background: #6c47ff; border: none; border-radius: 8px;
+      color: #fff; font-size: 0.88rem; cursor: pointer; white-space: nowrap;
+    }
+    .query-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Answer */
+    #answer-box {
+      margin-top: 24px; background: #1a1a24; border: 1px solid #2a2a38;
+      border-radius: 10px; padding: 20px; display: none;
+    }
+    #answer-box .meta { font-size: 0.75rem; color: #555; margin-bottom: 10px; }
+    #answer-box .meta span { color: #6c47ff; }
+    #answer-text { font-size: 0.9rem; line-height: 1.7; white-space: pre-wrap; }
+    #sources { margin-top: 14px; }
+    #sources p { font-size: 0.75rem; color: #666; margin-bottom: 6px; }
+    .source-tag {
+      display: inline-block; background: #111118; border: 1px solid #2a2a38;
+      border-radius: 4px; padding: 3px 8px; font-size: 0.72rem; color: #888; margin: 2px;
+    }
+
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #333;
+      border-top-color: #6c47ff; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-left: 8px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RAGNAROK-DOCS</h1>
+  <div class="model-toggle">
+    <label>Model</label>
+    <div class="toggle-group">
+      <button class="toggle-btn active" data-mode="instruct" onclick="setMode('instruct')">Instruct</button>
+      <button class="toggle-btn" data-mode="ragnarok_tuned" onclick="setMode('ragnarok_tuned')">Ragnarok-Tuned</button>
+      <button class="toggle-btn" data-mode="local_ragnarok" onclick="setMode('local_ragnarok')">Local Ragnarok</button>
+    </div>
+    <span id="mode-status">Loading...</span>
+  </div>
+</header>
+
+<main>
+  <div class="section">
+    <h2>Upload Documents</h2>
+    <div class="upload-box" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".pdf" multiple onchange="uploadFiles(this.files)" />
+      <p>Drop PDFs here or <span>click to browse</span></p>
+      <div id="upload-status"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Ask a Question</h2>
+    <div class="query-row">
+      <input type="text" id="question" placeholder="Ask anything about your documents..." onkeydown="if(event.key==='Enter') ask()" />
+      <button id="ask-btn" onclick="ask()">Ask</button>
+    </div>
+    <div id="answer-box">
+      <div class="meta">Answered using <span id="mode-label"></span> &nbsp;·&nbsp; <span id="chunks-label"></span> chunks searched</div>
+      <div id="answer-text"></div>
+      <div id="sources"><p>Sources</p></div>
+    </div>
+  </div>
+</main>
+
+<script>
+  const API = "";  // same origin; change to "http://localhost:8000" for local dev
+
+  async function loadMode() {
+    try {
+      const res = await fetch(`${API}/api/config`);
+      const data = await res.json();
+      applyMode(data.model_mode);
+    } catch {
+      document.getElementById("mode-status").textContent = "API unreachable";
+    }
+  }
+
+  async function setMode(mode) {
+    document.getElementById("mode-status").textContent = "Switching...";
+    const res = await fetch(`${API}/api/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_mode: mode })
+    });
+    const data = await res.json();
+    applyMode(data.model_mode);
+  }
+
+  function applyMode(mode) {
+    document.querySelectorAll(".toggle-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+    const labels = {
+      instruct: "meta-llama/Llama-3.1-8B-Instruct",
+      ragnarok_tuned: "llama3-ragnarok-merged (HF Endpoint)",
+      local_ragnarok: "Local via ngrok"
+    };
+    document.getElementById("mode-status").textContent = labels[mode] || mode;
+  }
+
+  async function uploadFiles(files) {
+    const status = document.getElementById("upload-status");
+    for (const file of files) {
+      status.innerHTML = `Uploading ${file.name}… <span class="spinner"></span>`;
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const res = await fetch(`${API}/api/upload`, { method: "POST", body: form });
+        const data = await res.json();
+        status.textContent = `✓ ${file.name} — ${data.chunks_created ?? data.message ?? "uploaded"}`;
+      } catch (e) {
+        status.textContent = `✗ Failed: ${e.message}`;
+      }
+    }
+  }
+
+  async function ask() {
+    const q = document.getElementById("question").value.trim();
+    if (!q) return;
+    const btn = document.getElementById("ask-btn");
+    btn.disabled = true;
+    btn.innerHTML = `Ask <span class="spinner"></span>`;
+
+    const box = document.getElementById("answer-box");
+    box.style.display = "none";
+
+    try {
+      const res = await fetch(`${API}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, top_k: 5 })
+      });
+      const data = await res.json();
+
+      document.getElementById("answer-text").textContent = data.answer;
+      document.getElementById("mode-label").textContent =
+        document.getElementById("mode-status").textContent;
+      document.getElementById("chunks-label").textContent = data.chunks_searched;
+
+      const srcDiv = document.getElementById("sources");
+      srcDiv.innerHTML = "<p>Sources</p>";
+      (data.sources || []).forEach(s => {
+        const tag = document.createElement("span");
+        tag.className = "source-tag";
+        tag.textContent = `${s.file} · p${s.page}`;
+        srcDiv.appendChild(tag);
+      });
+
+      box.style.display = "block";
+    } catch (e) {
+      document.getElementById("answer-text").textContent = `Error: ${e.message}`;
+      box.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Ask";
+    }
+  }
+
+  loadMode();
+</script>
+</body>
+</html>

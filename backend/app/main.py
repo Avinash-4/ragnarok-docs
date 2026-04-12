@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import upload, query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from app.routes import upload, query, config
+import os
 
 # Initialize the FastAPI app
 app = FastAPI(
@@ -22,6 +25,16 @@ app.add_middleware(
 # Register the route modules
 app.include_router(upload.router, prefix="/api", tags=["Documents"])
 app.include_router(query.router, prefix="/api", tags=["Query"])
+app.include_router(config.router, prefix="/api", tags=["Config"])
+
+# Serve the frontend static files
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+    @app.get("/app", include_in_schema=False)
+    async def serve_frontend():
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 
 @app.get("/")
@@ -38,9 +51,10 @@ async def root():
 async def health_check():
     """Detailed health check for deployment monitoring"""
     from app.services.embedder import get_document_count
+    from app.services import state
     return {
         "status": "healthy",
         "indexed_chunks": get_document_count(),
-        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "model_mode": state.model_mode,
         "vector_db": "ChromaDB"
     }

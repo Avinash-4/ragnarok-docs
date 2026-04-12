@@ -1,159 +1,137 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from dotenv import load_dotenv
 import os
-import torch
 
 load_dotenv()
 
 MODEL_ID = os.getenv("MODEL_ID", "meta-llama/Llama-3.1-8B-Instruct")
+MERGED_MODEL_ID = os.getenv("MERGED_MODEL_ID", "avinashkongara4/llama3-ragnarok-merged")
+RAGNAROK_ENDPOINT = os.getenv("RAGNAROK_ENDPOINT")
+LOCAL_RAGNAROK_ENDPOINT = os.getenv("LOCAL_RAGNAROK_ENDPOINT")
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
-
-# Global variable to cache the model so we only load it once
-_model_pipeline = None
-
-
-def load_llm():
-    """
-    Loads LLaMA 3.1 8B Instruct model from HuggingFace.
-
-    Uses 4-bit quantization (load_in_4bit=True) so the 8B parameter
-    model fits in less RAM. Without this, it needs ~16GB RAM.
-    With 4-bit quantization, it needs only ~5GB RAM.
-
-    The model is cached globally so it only loads once per server start.
-    Loading takes ~2-3 minutes the first time (downloads ~4GB of weights).
-
-    Returns:
-        HuggingFace text generation pipeline
-    """
-    global _model_pipeline
-
-    # Return cached model if already loaded
-    if _model_pipeline is not None:
-        print("Using cached LLaMA model")
-        return _model_pipeline
-
-    print(f"Loading LLaMA model: {MODEL_ID}")
-    print("This takes 2-3 minutes on first load...")
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_ID,
-        token=HUGGINGFACE_TOKEN
-    )
-
-    # Detect if GPU is available, otherwise use CPU
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Running on: {device}")
-
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        token=HUGGINGFACE_TOKEN,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map="auto" if device == "cuda" else None,
-        low_cpu_mem_usage=True
-    )
-
-    _model_pipeline = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        max_new_tokens=512,
-        temperature=0.1,
-        do_sample=True,
-        pad_token_id=tokenizer.eos_token_id
-    )
-
-    print("LLaMA model loaded successfully!")
-    return _model_pipeline
 
 
 def build_rag_prompt(question: str, context: str) -> str:
-    """
-    Builds the prompt that gets sent to LLaMA.
-
-    The prompt instructs LLaMA to ONLY answer from the provided
-    context and to cite which sources it used. This prevents
-    hallucination — the model making things up.
-
-    Args:
-        question: The user's question
-        context: The retrieved chunks from ChromaDB
-
-    Returns:
-        Formatted prompt string ready for LLaMA
-    """
-    prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are a helpful document assistant for the ragnarok-docs system.
-Answer the user's question using ONLY the context provided below.
-If the answer is not in the context, say "I could not find this information in the uploaded documents."
-Always mention which source (file name and page number) your answer comes from.
-Be concise and accurate.
+    return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are a document assistant. You ONLY answer using the CONTEXT below.
+STRICT RULES — you must follow all of these:
+1. If the answer is not explicitly stated in the CONTEXT, respond EXACTLY with: "I could not find this information in the uploaded documents."
+2. Do NOT use your training knowledge. Do NOT guess. Do NOT infer from general knowledge.
+3. Every answer must cite the exact file name and page number from the CONTEXT.
+4. If the CONTEXT does not mention the topic at all, say you could not find it — even if you know the answer from training.
 <|eot_id|><|start_header_id|>user<|end_header_id|>
 
-CONTEXT FROM DOCUMENTS:
+CONTEXT FROM UPLOADED DOCUMENTS:
 {context}
 
 QUESTION: {question}
+
+Remember: only answer from the CONTEXT above. If it is not there, say you could not find it.
 <|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
-    return prompt
 
 
-def generate_answer(question: str, context: str) -> str:
-    """
-    The main function — takes a question and context chunks,
-    builds the RAG prompt, sends it to LLaMA 3, and returns
-    the generated answer.
-
-    This is the GENERATION step in RAG.
-
-    Args:
-        question: User's question
-        context: Formatted context string from retriever.py
-
-    Returns:
-        LLaMA's answer as a string
-    """
-    llm = load_llm()
-
-    prompt = build_rag_prompt(question, context)
-
-    print(f"Generating answer for: '{question}'")
-
-    # Generate the response
-    outputs = llm(prompt)
-
-    # Extract just the assistant's reply from the full output
-    full_output = outputs[0]["generated_text"]
-
-    # Split on the assistant header to get only the answer part
-    answer = full_output.split("<|start_header_id|>assistant<|end_header_id|>")[-1]
-    answer = answer.strip()
-
-    return answer
-
-
-def generate_answer_hf_api(question: str, context: str) -> str:
+def generate_answer_hf_api(question: str, context: str, model_id: str = None) -> str:
+    """Call HF serverless Inference API (for instruct model)."""
     from huggingface_hub import InferenceClient
 
-    client = InferenceClient(token=HUGGINGFACE_TOKEN)
+    target = model_id or MODEL_ID
+    print(f"Calling HF API: {target}")
 
+    client = InferenceClient(token=HUGGINGFACE_TOKEN)
     result = client.chat_completion(
-        model="meta-llama/Llama-3.1-8B-Instruct",
+        model=target,
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful document assistant. Answer using only the provided context. Always cite the source file and page number."
+                "content": "You are a document assistant. Answer ONLY from the provided context. If the answer is not in the context, say 'I could not find this information in the uploaded documents.' Do NOT use training knowledge. Always cite the file name and page number."
             },
             {
                 "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}"
+                "content": f"CONTEXT FROM UPLOADED DOCUMENTS:\n{context}\n\nQUESTION: {question}\n\nRemember: only answer from the context above. If it is not there, say you could not find it."
             }
         ],
         max_tokens=512,
         temperature=0.1
     )
+    return result.choices[0].message.content.strip()
 
-    answer = result.choices[0].message.content
-    return answer.strip()
-    
+
+def generate_answer_endpoint(question: str, context: str) -> str:
+    """Call a dedicated HF Inference Endpoint with raw text-generation format."""
+    import httpx
+
+    prompt = build_rag_prompt(question, context)
+    print(f"Calling endpoint: {RAGNAROK_ENDPOINT}")
+
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Try chat messages format first (TGI chat template)
+    response = httpx.post(
+        f"{RAGNAROK_ENDPOINT.rstrip('/')}/v1/chat/completions",
+        headers=headers,
+        json={
+            "model": "tgi",
+            "messages": [
+                {"role": "system", "content": "You are a document assistant. Answer ONLY from the provided context. If the answer is not in the context, say 'I could not find this information in the uploaded documents.' Do NOT use training knowledge. Always cite the file name and page number."},
+                {"role": "user", "content": f"CONTEXT FROM UPLOADED DOCUMENTS:\n{context}\n\nQUESTION: {question}\n\nRemember: only answer from the context above. If it is not there, say you could not find it."}
+            ],
+            "max_tokens": 512,
+            "temperature": 0.1
+        },
+        timeout=60
+    )
+
+    # If chat endpoint not found, fall back to raw text-generation format
+    if response.status_code == 404:
+        response = httpx.post(
+            RAGNAROK_ENDPOINT.rstrip('/'),
+            headers=headers,
+            json={
+                "inputs": prompt,
+                "parameters": {"max_new_tokens": 512, "temperature": 0.1, "do_sample": True, "return_full_text": False}
+            },
+            timeout=60
+        )
+
+    if not response.is_success:
+        print(f"Endpoint error {response.status_code}: {response.text}")
+    response.raise_for_status()
+    data = response.json()
+
+    # Chat completions format: {"choices": [{"message": {"content": "..."}}]}
+    if "choices" in data:
+        return data["choices"][0]["message"]["content"].strip()
+    # TGI text-generation format: [{"generated_text": "..."}]
+    if isinstance(data, list):
+        return data[0].get("generated_text", "").strip()
+    return data.get("generated_text", str(data)).strip()
+
+
+def generate_answer_local_ragnarok(question: str) -> dict:
+    """
+    Forward the question to the local Ragnarok pipeline running via ngrok.
+    The local server handles its own retrieval + generation and returns
+    {"answer": "...", "sources": [...], "chunks_searched": N}.
+    """
+    import httpx
+
+    url = f"{LOCAL_RAGNAROK_ENDPOINT.rstrip('/')}/query"
+    print(f"Calling local Ragnarok: {url}")
+
+    response = httpx.post(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true"
+        },
+        json={"question": question, "top_k": 5},
+        timeout=120
+    )
+
+    if not response.is_success:
+        print(f"Local Ragnarok error {response.status_code}: {response.text}")
+    response.raise_for_status()
+    return response.json()

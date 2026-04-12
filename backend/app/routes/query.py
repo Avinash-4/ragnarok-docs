@@ -1,17 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.retriever import retrieve_relevant_chunks, format_context_for_prompt
-from app.services.llm import generate_answer_hf_api
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
+from app.services.llm import generate_answer_hf_api, generate_answer_endpoint, generate_answer_local_ragnarok, MODEL_ID
+from app.services import state
 
 router = APIRouter()
-
-# Set to True to use local LLaMA model
-# Set to False to use HuggingFace Inference API (better for deployment)
-USE_LOCAL_MODEL = os.getenv("USE_LOCAL_MODEL", "false").lower() == "true"
 
 
 class QueryRequest(BaseModel):
@@ -76,14 +69,24 @@ async def query_documents(request: QueryRequest):
     # Step 3: Format context for the prompt
     context, sources = format_context_for_prompt(results)
 
-    # Step 4: Generate answer with LLaMA 3
+    # Step 4: Generate answer — route to correct model based on toggle
     try:
-        if USE_LOCAL_MODEL:
-            from app.services.llm import generate_answer
-            answer = generate_answer(request.question, context)
+        if state.model_mode == "local_ragnarok":
+            # Local pipeline handles retrieval + generation — return its full response
+            local_result = generate_answer_local_ragnarok(request.question)
+            return QueryResponse(
+                question=request.question,
+                answer=local_result.get("answer", "No answer returned."),
+                sources=local_result.get("sources", sources),
+                chunks_searched=local_result.get("chunks_searched", len(results))
+            )
+        elif state.model_mode == "ragnarok_tuned":
+            answer = generate_answer_endpoint(request.question, context)
         else:
-            answer = generate_answer_hf_api(request.question, context)
+            answer = generate_answer_hf_api(request.question, context, model_id=MODEL_ID)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Answer generation failed: {str(e)}"
